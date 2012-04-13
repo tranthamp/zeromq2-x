@@ -28,6 +28,8 @@
 #define ZMQ_ATOMIC_COUNTER_MUTEX
 #elif (defined __i386__ || defined __x86_64__) && defined __GNUC__
 #define ZMQ_ATOMIC_COUNTER_X86
+#elif defined __ARM_ARCH_7A__ && defined __GNUC__
+#define ZMQ_ATOMIC_COUNTER_ARM
 #elif defined ZMQ_HAVE_WINDOWS
 #define ZMQ_ATOMIC_COUNTER_WINDOWS
 #elif (defined ZMQ_HAVE_SOLARIS || defined ZMQ_HAVE_NETBSD)
@@ -87,6 +89,17 @@ namespace zmq
                 : "=r" (old_value), "=m" (value)
                 : "0" (increment_), "m" (value)
                 : "cc", "memory");
+#elif defined ZMQ_ATOMIC_COUNTER_ARM
+            integer_t flag, tmp;
+            __asm__ volatile (
+                "1:     ldrex   %0, [%5]\n\t"
+                "       add     %2, %0, %4\n\t"
+                "       strex   %1, %2, [%5]\n\t"
+                "       teq     %1, #0\n\t"
+                "       bne     1b\n\t"
+                : "=&r"(old_value), "=&r"(flag), "=&r"(tmp), "+Qo"(value)
+                : "Ir"(increment_), "r"(&value)
+                : "cc");
 #elif defined ZMQ_ATOMIC_COUNTER_MUTEX
             sync.lock ();
             old_value = value;
@@ -117,6 +130,18 @@ namespace zmq
                 : "0" (oldval), "m" (*val)
                 : "cc", "memory");
             return oldval != decrement;
+#elif defined ZMQ_ATOMIC_COUNTER_ARM
+            integer_t old_value, flag, tmp;
+            __asm__ volatile (
+                "1:     ldrex   %0, [%5]\n\t"
+                "       sub     %2, %0, %4\n\t"
+                "       strex   %1, %2, [%5]\n\t"
+                "       teq     %1, #0\n\t"
+                "       bne     1b\n\t"
+                : "=&r"(old_value), "=&r"(flag), "=&r"(tmp), "+Qo"(value)
+                : "Ir"(decrement), "r"(&value)
+                : "cc");
+            return old_value - decrement != 0;
 #elif defined ZMQ_ATOMIC_COUNTER_MUTEX
             sync.lock ();
             value -= decrement;
@@ -155,6 +180,9 @@ namespace zmq
 #endif
 #if defined ZMQ_ATOMIC_COUNTER_X86
 #undef ZMQ_ATOMIC_COUNTER_X86
+#endif
+#if defined ZMQ_ATOMIC_COUNTER_ARM
+#undef ZMQ_ATOMIC_COUNTER_ARM
 #endif
 #if defined ZMQ_ATOMIC_COUNTER_MUTEX
 #undef ZMQ_ATOMIC_COUNTER_MUTEX
